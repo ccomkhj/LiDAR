@@ -45,11 +45,14 @@ class AppState:
     def reset(self):
         self.pitch, self.yaw, self.distance = 0, 0, 2
         self.translation[:] = 0, 0, -1
-
+                      
     @property
     def rotation(self):
         Rx, _ = cv2.Rodrigues((self.pitch, 0, 0))
         Ry, _ = cv2.Rodrigues((0, self.yaw, 0))
+        '''
+        Rodrigues: Converts a rotation matrix to a rotation vector or vice versa.
+        '''
         return np.dot(Ry, Rx).astype(np.float32)
 
     @property
@@ -148,7 +151,7 @@ cv2.setMouseCallback(state.WIN_NAME, mouse_cb)
 
 def project(v):
     """project 3d vector array to 2d"""
-    h, w = out.shape[:2]
+    h, w = out.shape[:2] # (240, 320)
     view_aspect = float(h)/w
 
     # ignore divide by zero for invalid depth
@@ -160,23 +163,38 @@ def project(v):
     znear = 0.03
     proj[v[:, 2] < znear] = np.nan
     return proj
+"""
+h: 120, w: 160
+v: array([[-0.61237243,  0.55379776,  1.73864196]])
+proj: array([[ 75.46886251, 196.44556292]]) # keep updated.
 
+"""
 
 def view(v):
     """apply view transformation on vector array"""
+    """ Mapping from world to camera coordinate """
     return np.dot(v - state.pivot, state.rotation) + state.pivot - state.translation
 
+"""
+v: array([-0.5,  0.5,  0.5])
+state.pivot: array([0., 0., 1.], dtype=float32)
+state.rotation:
+array([[ 0.9659258 ,  0.04494346, -0.254887  ],
+       [ 0.        ,  0.9848077 ,  0.17364818],
+       [ 0.25881904, -0.16773126,  0.95125127]], dtype=float32)
+"""
 
 def line3d(out, pt1, pt2, color=(0x80, 0x80, 0x80), thickness=1):
     """draw a 3d line from pt1 to pt2"""
-    p0 = project(pt1.reshape(-1, 3))[0]
+    p0 = project(pt1.reshape(-1, 3))[0] 
     p1 = project(pt2.reshape(-1, 3))[0]
+    """ p0 and p1 is are 2 end points in image plane based on x for grid """
     if np.isnan(p0).any() or np.isnan(p1).any():
         return
     p0 = tuple(p0.astype(int))
     p1 = tuple(p1.astype(int))
     rect = (0, 0, out.shape[1], out.shape[0])
-    inside, p0, p1 = cv2.clipLine(rect, p0, p1)
+    inside, p0, p1 = cv2.clipLine(rect, p0, p1) # Clips the line against the image rectangle.
     if inside:
         cv2.line(out, p0, p1, color, thickness, cv2.LINE_AA)
 
@@ -235,9 +253,9 @@ def pointcloud(out, verts, texcoords, color, painter=True):
 
         # get reverse sorted indices by z (in view-space)
         # https://gist.github.com/stevenvo/e3dad127598842459b68
-        v = view(verts)
+        v = view(verts) # convert all 3D verticies (x,y,z) from world to camera view.
         s = v[:, 2].argsort()[::-1]
-        proj = project(v[s])
+        proj = project(v[s]) # 3D points are project to 2D image plane.
     else:
         proj = project(view(verts))
 
@@ -254,7 +272,7 @@ def pointcloud(out, verts, texcoords, color, painter=True):
     jm = (j >= 0) & (j < w)
     m = im & jm
 
-    cw, ch = color.shape[:2][::-1]
+    cw, ch = color.shape[:2][::-1] # RGB image of camera
     if painter:
         # sort texcoord with same indices as above
         # texcoords are [0..1] and relative to top-left pixel corner,
@@ -263,7 +281,7 @@ def pointcloud(out, verts, texcoords, color, painter=True):
     else:
         v, u = (texcoords * (cw, ch) + 0.5).astype(np.uint32).T
     # clip texcoords to image
-    np.clip(u, 0, ch-1, out=u)
+    np.clip(u, 0, ch-1, out=u) # numpy.clip(a, a_min, a_max, out=saved arr),
     np.clip(v, 0, cw-1, out=v)
 
     # perform uv-mapping
@@ -287,6 +305,9 @@ while True:
         depth_intrinsics = rs.video_stream_profile(
             depth_frame.profile).get_intrinsics()
         w, h = depth_intrinsics.width, depth_intrinsics.height
+        '''
+        depth_intrinsic: [ 160x120  p[77.4902 62.5977]  f[114.278 114.593]  None [0 0 0 0 0] ]
+        '''
 
         depth_image = np.asanyarray(depth_frame.get_data())
         color_image = np.asanyarray(color_frame.get_data())
@@ -304,13 +325,13 @@ while True:
 
         # Pointcloud data to arrays
         v, t = points.get_vertices(), points.get_texture_coordinates()
-        verts = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz
-        texcoords = np.asanyarray(t).view(np.float32).reshape(-1, 2)  # uv
+        verts = np.asanyarray(v).view(np.float32).reshape(-1, 3)  # xyz # (19200, 3)
+        texcoords = np.asanyarray(t).view(np.float32).reshape(-1, 2)  # uv # (19200, 2) # np.asanyarray: convert the input to an ndarray, but pass ndarray subclasses.
 
     # Render
     now = time.time()
 
-    out.fill(0)
+    out.fill(0) # fill the zero to the array.
 
     grid(out, (0, 0.5, 1), size=1, n=10)
     frustum(out, depth_intrinsics)
