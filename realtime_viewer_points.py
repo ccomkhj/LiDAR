@@ -79,8 +79,9 @@ if not found_rgb:
     print("The demo requires Depth camera with Color sensor")
     exit(0)
 
-config.enable_stream(rs.stream.depth, rs.format.z16, 30)
-config.enable_stream(rs.stream.color, rs.format.bgr8, 30)
+config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
+config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+
 
 # Start streaming
 pipeline.start(config)
@@ -89,13 +90,16 @@ pipeline.start(config)
 profile = pipeline.get_active_profile()
 depth_profile = rs.video_stream_profile(profile.get_stream(rs.stream.depth))
 depth_intrinsics = depth_profile.get_intrinsics()
+
 w, h = depth_intrinsics.width, depth_intrinsics.height
 
 # Processing blocks
 pc = rs.pointcloud()
-decimate = rs.decimation_filter()
+decimate = rs.decimation_filter() 
+# Decimation is the process of reducing the sampling frequency of a signal to a lower sampling frequency that differs from the original frequency by an integer value.
 decimate.set_option(rs.option.filter_magnitude, 2 ** state.decimate)
 colorizer = rs.colorizer()
+
 
 
 def mouse_cb(event, x, y, flags, param):
@@ -158,10 +162,16 @@ def project(v):
     with np.errstate(divide='ignore', invalid='ignore'):
         proj = v[:, :-1] / v[:, -1, np.newaxis] * \
             (w*view_aspect, h) + (w/2.0, h/2.0)
+    '''
+    v[:, :-1] = x and y coordinates of vertices in camera's view
+    v[:, -1, np.newaxis] = z coordinates of vertices in camera's view 
+    v[:, :-1] / v[:, -1, np.newaxis] = normalized coordinates [x', y', 1]
+    Normalized coordinates will be fitted into the shape of output [h, w]
+    '''
 
     # near clipping
     znear = 0.03
-    proj[v[:, 2] < znear] = np.nan
+    proj[v[:, 2] < znear] = np.nan # if z of vertices in camera's view was too small. Then normalization process is not reliable. So, define as NaN.
     return proj
 """
 h: 120, w: 160
@@ -253,11 +263,12 @@ def pointcloud(out, verts, texcoords, color, painter=True):
 
         # get reverse sorted indices by z (in view-space)
         # https://gist.github.com/stevenvo/e3dad127598842459b68
-        v = view(verts) # convert all 3D verticies (x,y,z) from world to camera view.
-        s = v[:, 2].argsort()[::-1]
+        v = view(verts) # convert all 3D verticies (x,y,z) from world to camera view. # It is still in 3D space.
+        s = v[:, 2].argsort()[::-1] # sorted z values
         proj = project(v[s]) # 3D points are project to 2D image plane.
     else:
         proj = project(view(verts))
+
 
     if state.scale:
         proj *= 0.5**state.decimate
@@ -344,7 +355,14 @@ while True:
         pointcloud(tmp, verts, texcoords, color_source)
         tmp = cv2.resize(
             tmp, out.shape[:2][::-1], interpolation=cv2.INTER_NEAREST)
-        np.putmask(out, tmp > 0, tmp)
+        np.putmask(out, tmp > 0, tmp) # numpy.putmask(target arr, mask, values to put into target arr if mask is True)
+
+    '''
+    Segmentation should be aplpied to this out.
+    The second parameter of np.putmask should be the result of segmentation mask.
+    the size of out or tmp is the resolution of depth image.
+    640x480 for both color and depth images will be fine to match the size of input. 
+    '''
 
     if any(state.mouse_btns):
         axes(out, view(state.pivot), state.rotation, thickness=4)
@@ -375,10 +393,10 @@ while True:
         state.color ^= True
 
     if key == ord("s"):
-        cv2.imwrite('./out.png', out)
+        cv2.imwrite('./out2.png', out)
 
     if key == ord("e"):
-        points.export_to_ply('./out.ply', mapped_frame)
+        points.export_to_ply('./out2.ply', mapped_frame)
 
     if key in (27, ord("q")) or cv2.getWindowProperty(state.WIN_NAME, cv2.WND_PROP_AUTOSIZE) < 0:
         break
