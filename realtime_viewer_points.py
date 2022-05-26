@@ -19,6 +19,7 @@ Keyboard:
     [c]     Toggle color source
     [s]     Save PNG (./out.png)
     [e]     Export points to ply (./out.ply)
+    [a]     Save depth, color, colordepth map
     [q\ESC] Quit
 """
 
@@ -69,6 +70,7 @@ config = rs.config()
 pipeline_wrapper = rs.pipeline_wrapper(pipeline)
 pipeline_profile = config.resolve(pipeline_wrapper)
 device = pipeline_profile.get_device()
+device_product_line = str(device.get_info(rs.camera_info.product_line))
 
 found_rgb = False
 for s in device.sensors:
@@ -80,7 +82,28 @@ if not found_rgb:
     exit(0)
 
 config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
-config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+
+
+if device_product_line == 'L500':
+    config.enable_stream(rs.stream.depth, 1024, 768, rs.format.z16, 30)
+    config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+else:
+    config.enable_stream(rs.stream.depth,  rs.format.z16, 30)
+    config.enable_stream(rs.stream.color,  rs.format.bgr8, 30)
+
+'''
+L515
+Depth
+320x240
+640x480
+1024x768
+
+Color
+640x360
+640x480
+960x540
+1280x720
+'''
 
 
 # Start streaming
@@ -177,7 +200,6 @@ def project(v):
 h: 120, w: 160
 v: array([[-0.61237243,  0.55379776,  1.73864196]])
 proj: array([[ 75.46886251, 196.44556292]]) # keep updated.
-
 """
 
 def view(v):
@@ -316,6 +338,7 @@ while True:
         depth_intrinsics = rs.video_stream_profile(
             depth_frame.profile).get_intrinsics()
         w, h = depth_intrinsics.width, depth_intrinsics.height
+
         '''
         depth_intrinsic: [ 160x120  p[77.4902 62.5977]  f[114.278 114.593]  None [0 0 0 0 0] ]
         '''
@@ -362,6 +385,8 @@ while True:
     The second parameter of np.putmask should be the result of segmentation mask.
     the size of out or tmp is the resolution of depth image.
     640x480 for both color and depth images will be fine to match the size of input. 
+
+    After that, unproject is necessary to revive the point cloud.
     '''
 
     if any(state.mouse_btns):
@@ -393,10 +418,26 @@ while True:
         state.color ^= True
 
     if key == ord("s"):
-        cv2.imwrite('./out2.png', out)
+        cv2.imwrite('./L515_Point_Cloud_Capture.png', out)
 
     if key == ord("e"):
         points.export_to_ply('./out2.ply', mapped_frame)
+
+    if key == ord("a"):
+        import os
+        ''' Change the folder to save based on the device '''
+        path = 'demo/box/L515'
+        cv2.imwrite(os.path.join(path,'color_image.png'),color_image)
+        print('color captured')
+        cv2.imwrite(os.path.join(path,'depth_colormap.png'),depth_colormap)
+        print('depth color captured')
+        cv2.imwrite(os.path.join(path,'depth_image.png'),depth_image)
+        print('depth captured')
+        cv2.imwrite(os.path.join(path,'point_cloud.png'), out)
+        print('point cloud image captured')
+        points.export_to_ply(os.path.join(path,'point_cloud.ply'), mapped_frame)
+        print('point cloud saved')
+
 
     if key in (27, ord("q")) or cv2.getWindowProperty(state.WIN_NAME, cv2.WND_PROP_AUTOSIZE) < 0:
         break
